@@ -10,6 +10,8 @@ from mongoengine import ValidationError
 
 from flask import abort
 
+from werkzeug.contrib.sessions import SessionStore
+
 
 def _include_mongoengine(obj):
     for module in mongoengine, mongoengine.fields:
@@ -236,3 +238,41 @@ class ListFieldPagination(Pagination):
                                        'for this method to work'
         return self.__class__(self.queryset, self.doc_id, self.field_name,
             self.page + 1, self.per_page, self.total)
+
+class MongoSessionStore(SessionStore):
+    """Subclass of :class:`werkzeug.contrib.sessions.SessionStore`
+    which stores sessions using MongoDB documents.
+    """
+
+    def __init__(self, db, collection='session'):
+        super(MongoSessionStore, self).__init__()
+
+        if not isinstance(collection, basestring):
+            raise ValueError('collection argument should be string or unicode')
+
+        class DBSession(db.Document):
+            sid = mongoengine.StringField(primary_key=True)
+            data = mongoengine.DictField()
+            meta = {
+                'allow_inheritance': False,
+                'collection': collection,
+            }
+
+        self.cls = DBSession
+
+    def save(self, session):
+        doc = self.cls(
+            sid=session.sid,
+            data=dict(session))
+        doc.save()
+
+    def delete(self, session):
+        self.cls.objects(sid=session.sid).delete()
+
+    def get(self, sid):
+        doc = self.cls.objects(sid=sid).first()
+        if doc:
+            return self.session_class(dict(doc.data), sid, False)
+        else:
+            return self.session_class({}, sid, True)
+
